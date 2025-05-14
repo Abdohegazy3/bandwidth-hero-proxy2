@@ -13,70 +13,46 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     optimizeScans: true,
     chromaSubsampling: '4:4:4',
     force: true,
+    effort: 1, // تقليل المجهود لتسريع المعالجة
   };
 
-  // الدالة التي تحاول المعالجة باستخدام sharp
-  const processWithSharp = async (attemptOptions, useWebp = isWebp) => {
-    let image = sharp(buffer, attemptOptions);
+  // المحاولة الأساسية مع sharp
+  let result;
+  try {
+    let image = sharp(buffer, {
+      failOnError: false,
+      limitInputPixels: 268_435_456,
+      sequentialRead: true, // تسريع القراءة
+      pages: -1,
+    });
 
     if (isGrayscale) {
       image = image.grayscale();
     }
 
-    if (useWebp) {
-      image = image.toFormat('webp', options);
-    } else {
-      image = image.toFormat('jpeg', options);
-    }
-
-    return await image.toBuffer({ resolveWithObject: true });
-  };
-
-  // المحاولة الأولى: معالجة مباشرة مع sharp
-  let result;
-  try {
-    result = await processWithSharp({
-      failOnError: false,
-      limitInputPixels: 268_435_456,
-      pages: -1,
-    });
+    image = image.toFormat(isWebp ? 'webp' : 'jpeg', options);
+    result = await image.toBuffer({ resolveWithObject: true });
   } catch (err) {
-    console.warn('Sharp initial processing failed:', err.message);
+    console.warn('Sharp processing failed:', err.message);
   }
 
-  // المحاولة الثانية: استخدام sequentialRead مع تحجيم آمن
+  // إذا فشل sharp، جرب تحويل إلى JPEG بدلاً من WebP
   if (!result || !result.data || !result.info) {
-    console.warn('Falling back to sequential read processing with sharp');
+    console.warn('Retrying with JPEG format using sharp');
     try {
       let image = sharp(buffer, {
         failOnError: false,
+        limitInputPixels: 268_435_456,
         sequentialRead: true,
-      }).resize({ fit: 'inside', withoutEnlargement: true });
+        pages: -1,
+      });
 
       if (isGrayscale) {
         image = image.grayscale();
       }
 
-      if (isWebp) {
-        image = image.toFormat('webp', options);
-      } else {
-        image = image.toFormat('jpeg', options);
-      }
-
+      image = image.toFormat('jpeg', options);
       result = await image.toBuffer({ resolveWithObject: true });
-    } catch (err) {
-      console.warn('Sharp sequential read processing failed:', err.message);
-    }
-  }
-
-  // المحاولة الثالثة: تحويل إلى JPEG إذا فشل WebP
-  if (!result || !result.data || !result.info) {
-    console.warn('WebP processing failed, forcing JPEG processing with sharp');
-    try {
-      result = await processWithSharp({
-        failOnError: false,
-        sequentialRead: true,
-      }, false); // تحويل إلى JPEG
     } catch (err) {
       console.warn('Sharp JPEG processing failed:', err.message);
     }
