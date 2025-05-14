@@ -1,35 +1,33 @@
 const Jimp = require('jimp');
-const redirect = require('./redirect');
 
-module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
+async function compress(imagePath, useWebp, grayscale, quality, originalSize) {
   try {
-    if (!buffer || buffer.length === 0) {
-      return redirect(''); // إعادة توجيه إذا كانت البيانات غير صالحة
-    }
+    // قراءة الصورة باستخدام Jimp
+    const image = await Jimp.read(imagePath);
 
-    const image = await Jimp.read(buffer);
-
-    if (isGrayscale) {
+    // تطبيق grayscale إذا كان مطلوبًا
+    if (grayscale) {
       image.grayscale();
     }
 
-    // استخدام جودة ثابتة أو المقدمة
+    // ضبط الجودة (Jimp لا يدعم WebP، لذا سنستخدم JPEG)
     const output = await image
-      .quality(quality || 10)
-      .getBufferAsync(isWebp ? Jimp.MIME_JPEG : Jimp.MIME_JPEG); // ملاحظة: Jimp لا يدعم WebP مباشرة
+      .quality(quality || 40) // ضبط الجودة
+      .getBufferAsync(Jimp.MIME_JPEG); // تحويل إلى JPEG
 
     return {
       err: null,
-      output,
       headers: {
-        'content-type': 'image/jpeg',
-        'content-length': output.length.toString(),
-        'x-original-size': originalSize.toString(),
-        'x-bytes-saved': (originalSize - output.length).toString(),
+        'content-type': 'image/jpeg', // Jimp ينتج JPEG فقط
+        'content-length': output.length,
+        'x-original-size': originalSize,
+        'x-bytes-saved': originalSize - output.length,
       },
+      output,
     };
   } catch (err) {
-    console.error('Compression error:', err);
-    return redirect(''); // إعادة توجيه في حالة الخطأ
+    return { err };
   }
-};
+}
+
+module.exports = compress;
