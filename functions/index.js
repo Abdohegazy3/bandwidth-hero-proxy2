@@ -1,5 +1,5 @@
 const fetch = require('node-fetch');
-const pick = require('lodash').pick; // استبدال util/pick بـ lodash كما هو موجود
+const pick = require('lodash').pick;
 const shouldCompress = require('../util/shouldCompress');
 const compress = require('../util/compress');
 const DEFAULT_QUALITY = 40;
@@ -9,7 +9,7 @@ exports.handler = async (e, t) => {
     { jpeg: s, bw: o, l: a } = e.queryStringParameters;
 
   if (!r)
-    return { statusCode: 200, body: 'bandwidth-hero-proxy' }; // تغيير الاستجابة كما هو مطلوب
+    return { statusCode: 200, body: 'bandwidth-hero-proxy' };
 
   try {
     r = JSON.parse(r);
@@ -28,7 +28,7 @@ exports.handler = async (e, t) => {
         ...pick(e.headers, ['cookie', 'dnt', 'referer']),
         'user-agent': 'Bandwidth-Hero Compressor',
         'x-forwarded-for': e.headers['x-forwarded-for'] || e.ip,
-        via: '1.1 bandwidth-hero',
+        'via': '1.1 bandwidth-hero',
       },
       method: 'GET',
     });
@@ -37,8 +37,8 @@ exports.handler = async (e, t) => {
       return { statusCode: response.status || 302 };
     }
 
-    h = Object.fromEntries(response.headers.entries()); // تحويل Headers إلى كائن
-    const c = await response.buffer(); // الحصول على Buffer مباشرة
+    h = Object.fromEntries(response.headers.entries());
+    const c = await response.buffer();
     const l = h['content-type'] || '';
     const p = c.length;
 
@@ -55,7 +55,7 @@ exports.handler = async (e, t) => {
     let { err: u, output: y, headers: g } = await compress(c, d, n, i, p);
     if (u) throw (console.log('Conversion failed: ', r), u);
 
-    console.log(From ${p}, Saved: ${(p - y.length) / p}%);
+    console.log(`From ${p}, Saved: ${(p - y.length) / p}%`);
     let $ = y.toString('base64');
     return {
       statusCode: 200,
