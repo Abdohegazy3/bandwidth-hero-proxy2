@@ -1,33 +1,38 @@
-const Jimp = require('jimp');
+const sharp = require('sharp');
+const redirect = require('./redirect');
 
-async function compress(imagePath, useWebp, grayscale, quality, originalSize) {
+module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
   try {
-    // قراءة الصورة باستخدام Jimp
-    const image = await Jimp.read(imagePath);
-
-    // تطبيق grayscale إذا كان مطلوبًا
-    if (grayscale) {
-      image.grayscale();
+    // التحقق من صحة البيانات المدخلة
+    if (!buffer || buffer.length === 0) {
+      return redirect(''); // إعادة توجيه إلى URL فارغ (يمكن تعديله)
     }
 
-    // ضبط الجودة (Jimp لا يدعم WebP، لذا سنستخدم JPEG)
-    const output = await image
-      .quality(quality || 40) // ضبط الجودة
-      .getBufferAsync(Jimp.MIME_JPEG); // تحويل إلى JPEG
+    let image = sharp(buffer);
+    if (isGrayscale) {
+      image = image.grayscale();
+    }
+
+    if (isWebp) {
+      image = image.webp({ quality: quality || 40 });
+    } else {
+      image = image.jpeg({ quality: quality || 40 });
+    }
+
+    const output = await image.toBuffer();
 
     return {
       err: null,
-      headers: {
-        'content-type': 'image/jpeg', // Jimp ينتج JPEG فقط
-        'content-length': output.length,
-        'x-original-size': originalSize,
-        'x-bytes-saved': originalSize - output.length,
-      },
       output,
+      headers: {
+        'content-type': isWebp ? 'image/webp' : 'image/jpeg',
+        'content-length': output.length.toString(),
+        'x-original-size': originalSize.toString(),
+        'x-bytes-saved': (originalSize - output.length).toString(),
+      },
     };
   } catch (err) {
-    return { err };
+    console.error('Compression error:', err);
+    return redirect(''); // إعادة توجيه في حالة الخطأ
   }
-}
-
-module.exports = compress;
+};
