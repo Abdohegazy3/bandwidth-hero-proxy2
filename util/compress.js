@@ -16,45 +16,43 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     effort: 1, // تقليل المجهود لتسريع المعالجة
   };
 
-  // المحاولة الأساسية مع sharp
-  let result;
-  try {
-    let image = sharp(buffer, {
-      failOnError: false,
-      limitInputPixels: 268_435_456,
-      sequentialRead: true, // تسريع القراءة
-      pages: -1,
-    });
+  // الدالة التي تحاول المعالجة باستخدام sharp
+  const processWithSharp = async (attemptOptions, targetFormat) => {
+    let image = sharp(buffer, attemptOptions);
 
     if (isGrayscale) {
       image = image.grayscale();
     }
 
-    image = image.toFormat(isWebp ? 'webp' : 'jpeg', options);
-    result = await image.toBuffer({ resolveWithObject: true });
+    image = image.toFormat(targetFormat, options);
+    return await image.toBuffer({ resolveWithObject: true });
+  };
+
+  // المحاولة الأولى: تحويل إلى JPEG
+  let result;
+  try {
+    result = await processWithSharp({
+      failOnError: false,
+      limitInputPixels: 268_435_456,
+      sequentialRead: true,
+      pages: -1,
+    }, 'jpeg');
   } catch (err) {
-    console.warn('Sharp processing failed:', err.message);
+    console.warn('Sharp JPEG processing failed:', err.message);
   }
 
-  // إذا فشل sharp، جرب تحويل إلى JPEG بدلاً من WebP
+  // المحاولة الثانية: تحويل إلى WebP إذا فشل JPEG
   if (!result || !result.data || !result.info) {
-    console.warn('Retrying with JPEG format using sharp');
+    console.warn('Falling back to WebP processing with sharp');
     try {
-      let image = sharp(buffer, {
+      result = await processWithSharp({
         failOnError: false,
         limitInputPixels: 268_435_456,
         sequentialRead: true,
         pages: -1,
-      });
-
-      if (isGrayscale) {
-        image = image.grayscale();
-      }
-
-      image = image.toFormat('jpeg', options);
-      result = await image.toBuffer({ resolveWithObject: true });
+      }, 'webp');
     } catch (err) {
-      console.warn('Sharp JPEG processing failed:', err.message);
+      console.warn('Sharp WebP processing failed:', err.message);
     }
   }
 
@@ -87,7 +85,7 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     err: null,
     output,
     headers: {
-      'content-type': isWebp ? 'image/webp' : 'image/jpeg',
+      'content-type': result.info.format === 'webp' ? 'image/webp' : 'image/jpeg',
       'content-length': info.size.toString(),
       'x-original-size': originalSize.toString(),
       'x-bytes-saved': (originalSize - info.size).toString(),
