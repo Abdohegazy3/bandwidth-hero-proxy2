@@ -1,9 +1,8 @@
 const axios = require('axios');
-const pick = require('lodash').pick; // استبدال pick المخصص بـ lodash
+const pick = require('lodash').pick;
 const shouldCompress = require('../util/shouldCompress');
 const compress = require('../util/compress');
 
-// دالة لنسخ الرؤوس (مستوحاة من الكود المحسن)
 function copyHeaders(source, target = {}) {
   for (const [key, value] of Object.entries(source)) {
     target[key.toLowerCase()] = value;
@@ -14,18 +13,21 @@ function copyHeaders(source, target = {}) {
 const DEFAULT_QUALITY = 40;
 
 exports.handler = async (event, context) => {
-  // استخراج المعاملات
   let { url, jpeg, bw, l } = event.queryStringParameters || {};
 
-  // إرجاع رسالة ترحيب إذا لم يتم تقديم URL
+  // إذا لم يتم توفير URL، عُد باستجابة تدل على الخدمة كـ bandwidth-hero-proxy
   if (!url) {
     return {
       statusCode: 200,
-      body: 'Bandwidth Hero Data Compression Service',
+      headers: {
+        'X-Bandwidth-Hero': '1', // رأس لتأكيد الخدمة
+        'X-Service-Name': 'bandwidth-hero-proxy', // رأس مخصص لتعريف الخدمة
+        'content-type': 'text/plain',
+      },
+      body: 'bandwidth-hero-proxy', // تغيير الاستجابة إلى bandwidth-hero-proxy
     };
   }
 
-  // تحليل وتنظيف عنوان URL
   try {
     url = JSON.parse(url);
   } catch {}
@@ -34,18 +36,16 @@ exports.handler = async (event, context) => {
   }
   url = url.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, 'http://');
 
-  // إعدادات الضغط
-  const isWebp = !jpeg;
+  const isWebp = !jpeg; // Jimp ينتج JPEG فقط
   const isGrayscale = bw !== '0';
   const quality = parseInt(l, 10) || DEFAULT_QUALITY;
 
   try {
-    // جلب البيانات باستخدام axios
     const response = await axios.get(url, {
       headers: {
-        ...pick(event.headers, ['cookie', 'dnt', 'referer']),
+        ...pick(event.headers || {}, ['cookie', 'dnt', 'referer']),
         'user-agent': 'Bandwidth-Hero Compressor',
-        'x-forwarded-for': event.headers['x-forwarded-for'] || event.ip,
+        'x-forwarded-for': event.headers?.['x-forwarded-for'] || event.clientContext?.ip || '',
         via: '1.1 bandwidth-hero',
       },
       timeout: 10000,
@@ -54,7 +54,6 @@ exports.handler = async (event, context) => {
       validateStatus: () => true,
     });
 
-    // التحقق من حالة الاستجابة
     if (!response.status || response.status >= 400) {
       return {
         statusCode: response.status || 302,
@@ -64,12 +63,9 @@ exports.handler = async (event, context) => {
 
     const contentType = response.headers['content-type'] || '';
     const dataSize = response.data.length;
-
-    // إعداد الرؤوس
     let headers = copyHeaders(response.headers);
     headers['content-encoding'] = 'identity';
 
-    // التحقق مما إذا كان الضغط مطلوبًا
     if (!shouldCompress(contentType, dataSize, isWebp)) {
       console.log('Bypassing... Size:', dataSize);
       return {
@@ -80,7 +76,6 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // ضغط البيانات
     const { err, output, headers: compressHeaders } = await compress(
       response.data,
       isWebp,
@@ -91,12 +86,20 @@ exports.handler = async (event, context) => {
 
     if (err) {
       console.log('Conversion failed:', url);
-      throw err;
+      if (compressHeaders && compressHeaders.location) {
+        return {
+          statusCode: 302,
+          headers: compressHeaders,
+          body: '',
+        };
+      }
+      return {
+        statusCode: 500,
+        body: err.message || 'Compression failed',
+      };
     }
 
     console.log(`From ${dataSize}, Saved: ${(dataSize - output.length) / dataSize}%`);
-
-    // دمج رؤوس الضغط
     headers = { ...headers, ...compressHeaders };
 
     return {
@@ -109,7 +112,7 @@ exports.handler = async (event, context) => {
     console.error(err);
     return {
       statusCode: 500,
-      body: err.message || '',
+      body: err.message || 'Internal Server Error',
     };
   }
 };
