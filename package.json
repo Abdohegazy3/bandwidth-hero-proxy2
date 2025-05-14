@@ -8,8 +8,7 @@
     "test": "jest --watchAll"
   },
   "dependencies": {
-    "puppeteer-core": "^21.11.0",
-    "@sparticuz/chromium": "^123.0.0",
+    "node-fetch": "^2.6.1",
     "sharp": "^0.33.5",
     "jimp": "^0.22.12",
     "lodash": "^4.17.21",
