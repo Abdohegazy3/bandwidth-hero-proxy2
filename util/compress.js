@@ -3,46 +3,26 @@ const redirect = require('./redirect');
 
 module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
   try {
-    // التحقق من صحة البيانات المدخلة
+    // التحقق الأساسي من صحة البيانات المدخلة
     if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
       console.warn('Invalid or empty buffer received');
       return redirect('');
     }
 
-    // إنشاء نسخة من البيانة مع تحقق من تنسيق JPEG
+    // إعداد sharp مع خيارات للتعامل مع الصور المتضررة
     let image = sharp(buffer, {
-      failOnError: false,
+      failOnError: false, // محاولة معالجة الصور المتضررة
       limitInputPixels: 268_435_456, // حد أقصى 256 ميجابكسل
       animated: false,
     });
 
-    // التحقق من تنسيق الصورة
-    const metadata = await image.metadata().catch((err) => {
-      console.warn('Failed to read metadata:', err.message);
-      return null;
-    });
-
-    if (!metadata || (metadata.format !== 'jpeg' && metadata.format !== 'jpg' && !isWebp)) {
-      console.warn('Invalid or unsupported image format detected');
-      return {
-        err: null,
-        output: buffer,
-        headers: {
-          'content-type': 'application/octet-stream',
-          'content-length': buffer.length.toString(),
-          'x-original-size': originalSize.toString(),
-          'x-bytes-saved': '0',
-        },
-      };
-    }
-
     let format = isWebp ? 'webp' : 'jpeg';
     let options = {
-      quality: Math.max(1, Math.min(quality || 40, 100)),
+      quality: Math.max(1, Math.min(quality || 40, 100)), // ضمان الجودة بين 1 و100
       progressive: true,
       optimizeScans: true,
-      chromaSubsampling: '4:4:4',
-      force: true,
+      chromaSubsampling: '4:4:4', // تحسين جودة اللون
+      force: true, // فرض إعادة التشكيل
     };
 
     // تطبيق grayscale إذا كان مطلوبًا
@@ -57,22 +37,49 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
       image = image.toFormat('jpeg', options);
     }
 
-    // الحصول على البيانات الخارجة
+    // محاولة المعالجة والحصول على البيانات الخارجة
     const result = await image.toBuffer({ resolveWithObject: true }).catch((err) => {
-      console.warn('Failed to process image with sharp:', err.message);
+      console.error('Failed to process image with sharp:', err.message);
       return null;
     });
 
     if (!result || !result.data || !result.info) {
-      console.warn('Failed to generate output, returning original buffer');
+      console.error('Failed to generate output, attempting fallback processing');
+      // محاولة إصلاح الصورة عن طريق تحويلها إلى raw وإعادة المعالجة
+      image = sharp(buffer, {
+        failOnError: false,
+        sequentialRead: true, // قراءة تسلسلية لتجنب الأخطاء
+      });
+
+      if (isGrayscale) {
+        image = image.grayscale();
+      }
+
+      if (isWebp) {
+        image = image.toFormat('webp', options);
+      } else {
+        image = image.toFormat('jpeg', options);
+      }
+
+      const fallbackResult = await image.toBuffer({ resolveWithObject: true }).catch((err) => {
+        console.error('Fallback processing failed:', err.message);
+        return null;
+      });
+
+      if (!fallbackResult || !fallbackResult.data || !fallbackResult.info) {
+        console.error('All processing attempts failed, returning redirect');
+        return redirect('');
+      }
+
+      const { data: output, info } = fallbackResult;
       return {
         err: null,
-        output: buffer,
+        output,
         headers: {
           'content-type': isWebp ? 'image/webp' : 'image/jpeg',
-          'content-length': buffer.length.toString(),
+          'content-length': info.size.toString(),
           'x-original-size': originalSize.toString(),
-          'x-bytes-saved': '0',
+          'x-bytes-saved': (originalSize - info.size).toString(),
         },
       };
     }
@@ -81,15 +88,43 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
 
     // التحقق من أن الحجم الناتج منطقي
     if (!output || output.length >= originalSize) {
-      console.warn('Output size is invalid or larger than original, using original buffer');
+      console.warn('Output size is invalid or larger than original, attempting reprocessing');
+      // إعادة المحاولة مع خيارات أكثر صرامة
+      image = sharp(buffer, {
+        failOnError: false,
+        sequentialRead: true,
+      });
+
+      if (isGrayscale) {
+        image = image.grayscale();
+      }
+
+      options.quality = Math.max(1, options.quality - 10); // تقليل الجودة لتقليل الحجم
+      if (isWebp) {
+        image = image.toFormat('webp', options);
+      } else {
+        image = image.toFormat('jpeg', options);
+      }
+
+      const retryResult = await image.toBuffer({ resolveWithObject: true }).catch((err) => {
+        console.error('Retry processing failed:', err.message);
+        return null;
+      });
+
+      if (!retryResult || !retryResult.data || !retryResult.info) {
+        console.error('Retry processing failed, returning redirect');
+        return redirect('');
+      }
+
+      const { data: retryOutput, info: retryInfo } = retryResult;
       return {
         err: null,
-        output: buffer,
+        output: retryOutput,
         headers: {
           'content-type': isWebp ? 'image/webp' : 'image/jpeg',
-          'content-length': buffer.length.toString(),
+          'content-length': retryInfo.size.toString(),
           'x-original-size': originalSize.toString(),
-          'x-bytes-saved': '0',
+          'x-bytes-saved': (originalSize - retryInfo.size).toString(),
         },
       };
     }
@@ -110,29 +145,55 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
       err.message.includes('Input buffer contains unsupported image format') ||
       err.message.includes('VIPS_ERROR')
     ) {
-      console.warn('Unsupported or corrupted image detected, returning original buffer');
+      console.error('Unsupported or corrupted image detected, forcing processing');
+      // محاولة أخيرة بتحويل الصورة إلى raw ثم إعادة المعالجة
+      let image = sharp(buffer, {
+        failOnError: false,
+        sequentialRead: true,
+      });
+
+      if (isGrayscale) {
+        image = image.grayscale();
+      }
+
+      const options = {
+        quality: Math.max(1, Math.min(quality || 40, 100)),
+        progressive: true,
+        optimizeScans: true,
+        chromaSubsampling: '4:4:4',
+        force: true,
+      };
+
+      if (isWebp) {
+        image = image.toFormat('webp', options);
+      } else {
+        image = image.toFormat('jpeg', options);
+      }
+
+      const finalResult = await image.toBuffer({ resolveWithObject: true }).catch((err) => {
+        console.error('Final processing attempt failed:', err.message);
+        return null;
+      });
+
+      if (!finalResult || !finalResult.data || !finalResult.info) {
+        console.error('All processing attempts failed, returning redirect');
+        return redirect('');
+      }
+
+      const { data: output, info } = finalResult;
       return {
         err: null,
-        output: buffer,
+        output,
         headers: {
-          'content-type': 'image/jpeg',
-          'content-length': buffer.length.toString(),
+          'content-type': isWebp ? 'image/webp' : 'image/jpeg',
+          'content-length': info.size.toString(),
           'x-original-size': originalSize.toString(),
-          'x-bytes-saved': '0',
+          'x-bytes-saved': (originalSize - info.size).toString(),
         },
       };
     } else if (err.message.includes('out of memory')) {
-      console.warn('Memory limit exceeded, returning original buffer');
-      return {
-        err: null,
-        output: buffer,
-        headers: {
-          'content-type': 'image/jpeg',
-          'content-length': buffer.length.toString(),
-          'x-original-size': originalSize.toString(),
-          'x-bytes-saved': '0',
-        },
-      };
+      console.error('Memory limit exceeded, returning redirect');
+      return redirect('');
     }
     return redirect('');
   }
