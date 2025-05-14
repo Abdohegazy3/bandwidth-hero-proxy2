@@ -1,7 +1,17 @@
+[build]
+  command = "npm install && npm run build"
+  functions = "functions"
+
 [functions]
-    directory = "functions/"
+  directory = "functions/"
+  # تفعيل الوحدات الخارجية لدعم @sparticuz/chromium
+  external_node_modules = ["@sparticuz/chromium"]
+  # زيادة حد الذاكرة (اختياري، حسب الحاجة)
+  memory = 1024  # 1024MB (1GB) بدلاً من الافتراضي 128MB
+  # زيادة حد الوقت (اختياري)
+  timeout = 30  # 30 ثانية بدلاً من 10 ثوانٍ افتراضيًا
 
 [[redirects]]
-    from = "/api/*"
-    to = "/.netlify/functions/:splat"
-    status = 200
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
