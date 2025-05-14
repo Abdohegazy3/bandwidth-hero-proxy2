@@ -15,7 +15,7 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     try {
       imageInfo = await probe(buffer);
     } catch (probeErr) {
-      console.warn('Probe failed, attempting raw processing:', probeErr.message);
+      console.warn('Probe failed, proceeding with sharp:', probeErr.message);
       imageInfo = null;
     }
 
@@ -23,12 +23,12 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     let image = sharp(buffer, {
       failOnError: false,
       limitInputPixels: 268_435_456, // حد أقصى 256 ميجابكسل
-      pages: -1, // التعامل مع صفحات متعددة (مثل TIFF)
+      pages: -1,
     });
 
     let format = isWebp ? 'webp' : 'jpeg';
     let options = {
-      quality: Math.max(1, Math.min(quality || 40, 100)), // ضمان الجودة بين 1 و100
+      quality: Math.max(1, Math.min(quality || 40, 100)),
       progressive: true,
       optimizeScans: true,
       chromaSubsampling: '4:4:4',
@@ -59,8 +59,7 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
       image = sharp(buffer, {
         failOnError: false,
         sequentialRead: true,
-        density: 72, // ضبط الكثافة لتحسين المعالجة
-        raw: { width: imageInfo?.width || 0, height: imageInfo?.height || 0, channels: 3 }, // محاولة تحليل raw إذا أمكن
+        density: 72,
       });
 
       if (isGrayscale) {
@@ -79,13 +78,12 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
       });
     }
 
-    // إذا فشلت جميع المحاولات، استخدم معالجة أخيرة قسرية
+    // إذا فشلت جميع المحاولات، استخدم معالجة قسرية بدون raw
     if (!result || !result.data || !result.info) {
       console.warn('Forcing final processing attempt');
       image = sharp(buffer, {
         failOnError: false,
         sequentialRead: true,
-        raw: { width: 0, height: 0, channels: 4 }, // محاولة تحليل raw بقنوات افتراضية
       })
         .resize({ fit: 'inside', withoutEnlargement: true }) // تحجيم آمن
         .toFormat(format, options);
@@ -126,11 +124,10 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     };
   } catch (err) {
     console.error('Critical compression error:', err.message);
-    // محاولة أخيرة قسرية في حالة الأخطاء الحرجة
+    // محاولة أخيرة قسرية بدون raw
     let image = sharp(buffer, {
       failOnError: false,
       sequentialRead: true,
-      raw: { width: 0, height: 0, channels: 4 },
     })
       .resize({ fit: 'inside', withoutEnlargement: true })
       .toFormat(isWebp ? 'webp' : 'jpeg', {
@@ -149,7 +146,7 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
       console.error('All attempts failed, returning minimal processed output');
       return {
         err: null,
-        output: buffer, // كحل أخير، إرجاع الأصل مع تحذير
+        output: buffer,
         headers: {
           'content-type': isWebp ? 'image/webp' : 'image/jpeg',
           'content-length': buffer.length.toString(),
