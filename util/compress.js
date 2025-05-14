@@ -2,13 +2,12 @@ const sharp = require('sharp');
 const Jimp = require('jimp');
 
 module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
-  // التحقق الأساسي من صحة البيانات المدخلة
   if (!buffer || !Buffer.isBuffer(buffer)) {
     throw new Error('Invalid input buffer');
   }
 
   const options = {
-    quality: Math.max(1, Math.min(quality || 40, 100)), // الحفاظ على الجودة من الملحق
+    quality: Math.max(1, Math.min(quality || 40, 100)),
     progressive: true,
     optimizeScans: true,
     chromaSubsampling: '4:4:4',
@@ -16,7 +15,6 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     effort: 1,
   };
 
-  // الدالة التي تحاول المعالجة باستخدام sharp
   const processWithSharp = async (attemptOptions, targetFormat) => {
     let image = sharp(buffer, attemptOptions);
 
@@ -28,7 +26,6 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     return await image.toBuffer({ resolveWithObject: true });
   };
 
-  // المحاولة الأولى: تحويل إجباري إلى JPEG (تجاهل isWebp)
   let result;
   try {
     result = await processWithSharp({
@@ -41,7 +38,6 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     console.warn('Sharp JPEG processing failed:', err.message);
   }
 
-  // المحاولة الثانية: تحويل إلى WebP كخيار احتياطي (اختياري)
   if (!result || !result.data || !result.info) {
     console.warn('Falling back to WebP processing with sharp');
     try {
@@ -56,7 +52,6 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     }
   }
 
-  // المحاولة الأخيرة: استخدام jimp إذا فشل sharp
   if (!result || !result.data || !result.info) {
     console.warn('Falling back to jimp processing');
     const image = await Jimp.read(buffer);
