@@ -1,118 +1,69 @@
 const axios = require('axios');
-const pick = require('lodash').pick;
+const pick = require('lodash').pick; // استبدال util/pick بـ lodash لأنه غير موجود في الكود الأصلي
 const shouldCompress = require('../util/shouldCompress');
 const compress = require('../util/compress');
-
-function copyHeaders(source, target = {}) {
-  for (const [key, value] of Object.entries(source)) {
-    target[key.toLowerCase()] = value;
-  }
-  return target;
-}
-
 const DEFAULT_QUALITY = 40;
 
-exports.handler = async (event, context) => {
-  let { url, jpeg, bw, l } = event.queryStringParameters || {};
+exports.handler = async (e, t) => {
+  let { url: r } = e.queryStringParameters,
+    { jpeg: s, bw: o, l: a } = e.queryStringParameters;
 
-  // إذا لم يتم توفير URL، عُد باستجابة تدل على الخدمة كـ bandwidth-hero-proxy
-  if (!url) {
-    return {
-      statusCode: 200,
-      headers: {
-        'X-Bandwidth-Hero': '1', // رأس لتأكيد الخدمة
-        'X-Service-Name': 'bandwidth-hero-proxy', // رأس مخصص لتعريف الخدمة
-        'content-type': 'text/plain',
-      },
-      body: 'bandwidth-hero-proxy', // تغيير الاستجابة إلى bandwidth-hero-proxy
-    };
-  }
+  if (!r)
+    return { statusCode: 200, body: 'bandwidth-hero-proxy' }; // تغيير الاستجابة إلى bandwidth-hero-proxy كما هو مطلوب
 
   try {
-    url = JSON.parse(url);
+    r = JSON.parse(r);
   } catch {}
-  if (Array.isArray(url)) {
-    url = url.join('&url=');
-  }
-  url = url.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, 'http://');
+  Array.isArray(r) && (r = r.join('&url='));
+  r = r.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, 'http://');
 
-  const isWebp = !jpeg; // Jimp ينتج JPEG فقط
-  const isGrayscale = bw !== '0';
-  const quality = parseInt(l, 10) || DEFAULT_QUALITY;
+  let d = !s,
+    n = o != 0,
+    i = parseInt(a, 10) || 40;
 
   try {
-    const response = await axios.get(url, {
+    let h = {};
+    const response = await axios.get(r, {
       headers: {
-        ...pick(event.headers || {}, ['cookie', 'dnt', 'referer']),
+        ...pick(e.headers, ['cookie', 'dnt', 'referer']),
         'user-agent': 'Bandwidth-Hero Compressor',
-        'x-forwarded-for': event.headers?.['x-forwarded-for'] || event.clientContext?.ip || '',
+        'x-forwarded-for': e.headers['x-forwarded-for'] || e.ip,
         via: '1.1 bandwidth-hero',
       },
-      timeout: 10000,
-      maxRedirects: 5,
-      responseType: 'arraybuffer',
-      validateStatus: () => true,
+      responseType: 'arraybuffer', // للحصول على البيانات الثنائية
     });
 
-    if (!response.status || response.status >= 400) {
-      return {
-        statusCode: response.status || 302,
-        body: '',
-      };
+    if (response.status >= 400) {
+      return { statusCode: response.status || 302 };
     }
 
-    const contentType = response.headers['content-type'] || '';
-    const dataSize = response.data.length;
-    let headers = copyHeaders(response.headers);
-    headers['content-encoding'] = 'identity';
+    h = response.headers;
+    const c = Buffer.from(response.data); // تحويل arraybuffer إلى Buffer
+    const l = response.headers['content-type'] || '';
+    const p = c.length;
 
-    if (!shouldCompress(contentType, dataSize, isWebp)) {
-      console.log('Bypassing... Size:', dataSize);
+    if (!shouldCompress(l, p, d)) {
+      console.log('Bypassing... Size: ', c.length);
       return {
         statusCode: 200,
-        body: response.data.toString('base64'),
+        body: c.toString('base64'),
         isBase64Encoded: true,
-        headers,
+        headers: { 'content-encoding': 'identity', ...h },
       };
     }
 
-    const { err, output, headers: compressHeaders } = await compress(
-      response.data,
-      isWebp,
-      isGrayscale,
-      quality,
-      dataSize
-    );
+    let { err: u, output: y, headers: g } = await compress(c, d, n, i, p);
+    if (u) throw (console.log('Conversion failed: ', r), u);
 
-    if (err) {
-      console.log('Conversion failed:', url);
-      if (compressHeaders && compressHeaders.location) {
-        return {
-          statusCode: 302,
-          headers: compressHeaders,
-          body: '',
-        };
-      }
-      return {
-        statusCode: 500,
-        body: err.message || 'Compression failed',
-      };
-    }
-
-    console.log(`From ${dataSize}, Saved: ${(dataSize - output.length) / dataSize}%`);
-    headers = { ...headers, ...compressHeaders };
-
+    console.log(`From ${p}, Saved: ${(p - y.length) / p}%`);
+    let $ = y.toString('base64');
     return {
       statusCode: 200,
-      body: output.toString('base64'),
+      body: $,
       isBase64Encoded: true,
-      headers,
+      headers: { 'content-encoding': 'identity', ...h, ...g },
     };
-  } catch (err) {
-    console.error(err);
-    return {
-      statusCode: 500,
-      body: err.message || 'Internal Server Error',
-    };
+  } catch (f) {
+    return console.error(f), { statusCode: 500, body: f.message || '' };
   }
 };
