@@ -1,5 +1,5 @@
-const axios = require('axios');
-const pick = require('lodash').pick; // استبدال util/pick بـ lodash لأنه غير موجود في الكود الأصلي
+const fetch = require('node-fetch');
+const pick = require('lodash').pick; // استبدال util/pick بـ lodash كما هو موجود
 const shouldCompress = require('../util/shouldCompress');
 const compress = require('../util/compress');
 const DEFAULT_QUALITY = 40;
@@ -9,7 +9,7 @@ exports.handler = async (e, t) => {
     { jpeg: s, bw: o, l: a } = e.queryStringParameters;
 
   if (!r)
-    return { statusCode: 200, body: 'bandwidth-hero-proxy' }; // تغيير الاستجابة إلى bandwidth-hero-proxy كما هو مطلوب
+    return { statusCode: 200, body: 'bandwidth-hero-proxy' }; // تغيير الاستجابة كما هو مطلوب
 
   try {
     r = JSON.parse(r);
@@ -23,23 +23,23 @@ exports.handler = async (e, t) => {
 
   try {
     let h = {};
-    const response = await axios.get(r, {
+    const response = await fetch(r, {
       headers: {
         ...pick(e.headers, ['cookie', 'dnt', 'referer']),
         'user-agent': 'Bandwidth-Hero Compressor',
         'x-forwarded-for': e.headers['x-forwarded-for'] || e.ip,
         via: '1.1 bandwidth-hero',
       },
-      responseType: 'arraybuffer', // للحصول على البيانات الثنائية
+      method: 'GET',
     });
 
-    if (response.status >= 400) {
+    if (!response.ok) {
       return { statusCode: response.status || 302 };
     }
 
-    h = response.headers;
-    const c = Buffer.from(response.data); // تحويل arraybuffer إلى Buffer
-    const l = response.headers['content-type'] || '';
+    h = Object.fromEntries(response.headers.entries()); // تحويل Headers إلى كائن
+    const c = await response.buffer(); // الحصول على Buffer مباشرة
+    const l = h['content-type'] || '';
     const p = c.length;
 
     if (!shouldCompress(l, p, d)) {
