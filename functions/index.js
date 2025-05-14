@@ -1,4 +1,5 @@
-const puppeteer = require('puppeteer');
+const puppeteerCore = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium'); // بديل حديث لـ chrome-aws-lambda
 const pick = require('lodash').pick;
 const shouldCompress = require('../util/shouldCompress');
 const compress = require('../util/compress');
@@ -23,10 +24,19 @@ exports.handler = async (e, t) => {
 
   try {
     let h = {};
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+
+    // تحديد المسار التنفيذي لـ Chrome في بيئة Netlify
+    const executablePath = await chromium.executablePath;
+
+    // إعداد Puppeteer باستخدام chrome المدمج
+    const browser = await puppeteerCore.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: executablePath,
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
+
     const page = await browser.newPage();
 
     // إعدادات لتقليد سلوك المستخدم الحقيقي
@@ -42,27 +52,32 @@ exports.handler = async (e, t) => {
     await page.goto(r, { waitUntil: 'networkidle2', timeout: 30000 });
     await page.waitForFunction('document.querySelector("body") && !document.querySelector(".cf-browser-verification")', { timeout: 30000 });
 
-    // الحصول على المحتوى كـ Buffer
-    const c = await page.content();
-    const buffer = Buffer.from(c);
+    // استرجاع الصورة مباشرة (بدلاً من المحتوى الكلي)
+    const imageBuffer = await page.evaluate(async (url) => {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      return Array.from(new Uint8Array(arrayBuffer));
+    }, r);
+
+    const c = Buffer.from(imageBuffer);
 
     // إغلاق المتصفح
     await browser.close();
 
-    const l = 'text/html'; // يمكن تحسين هذا ليكون content-type الحقيقي
-    const p = buffer.length;
+    const l = 'image/jpeg'; // تحديد نوع المحتوى مباشرة
+    const p = c.length;
 
     if (!shouldCompress(l, p, d)) {
       console.log('Bypassing... Size: ', p);
       return {
         statusCode: 200,
-        body: buffer.toString('base64'),
+        body: c.toString('base64'),
         isBase64Encoded: true,
         headers: { 'content-encoding': 'identity', ...h },
       };
     }
 
-    let { err: u, output: y, headers: g } = await compress(buffer, d, n, i, p);
+    let { err: u, output: y, headers: g } = await compress(c, d, n, i, p);
     if (u) throw (console.log('Conversion failed: ', r), u);
 
     console.log(`From ${p}, Saved: ${(p - y.length) / p}%`);
