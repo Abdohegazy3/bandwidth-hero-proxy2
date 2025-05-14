@@ -8,12 +8,12 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
   }
 
   const options = {
-    quality: Math.max(1, Math.min(quality || 40, 100)),
+    quality: Math.max(1, Math.min(quality || 40, 100)), // الحفاظ على الجودة من الملحق
     progressive: true,
     optimizeScans: true,
     chromaSubsampling: '4:4:4',
     force: true,
-    effort: 1, // تقليل المجهود لتسريع المعالجة
+    effort: 1,
   };
 
   // الدالة التي تحاول المعالجة باستخدام sharp
@@ -28,7 +28,7 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     return await image.toBuffer({ resolveWithObject: true });
   };
 
-  // المحاولة الأولى: تحويل إلى JPEG
+  // المحاولة الأولى: تحويل إجباري إلى JPEG (تجاهل isWebp)
   let result;
   try {
     result = await processWithSharp({
@@ -41,7 +41,7 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     console.warn('Sharp JPEG processing failed:', err.message);
   }
 
-  // المحاولة الثانية: تحويل إلى WebP إذا فشل JPEG
+  // المحاولة الثانية: تحويل إلى WebP كخيار احتياطي (اختياري)
   if (!result || !result.data || !result.info) {
     console.warn('Falling back to WebP processing with sharp');
     try {
@@ -85,7 +85,7 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     err: null,
     output,
     headers: {
-      'content-type': result.info.format === 'webp' ? 'image/webp' : 'image/jpeg',
+      'content-type': info.format === 'webp' ? 'image/webp' : 'image/jpeg',
       'content-length': info.size.toString(),
       'x-original-size': originalSize.toString(),
       'x-bytes-saved': (originalSize - info.size).toString(),
