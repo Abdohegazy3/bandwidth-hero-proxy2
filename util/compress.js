@@ -1,4 +1,5 @@
 const sharp = require('sharp');
+const Jimp = require('jimp');
 const probe = require('probe-image-size');
 
 module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
@@ -27,15 +28,15 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
       force: true,
     };
 
-    // الدالة التي تحاول المعالجة بإعدادات مختلفة
-    const processImage = async (attemptOptions) => {
+    // الدالة التي تحاول المعالجة باستخدام sharp
+    const processWithSharp = async (attemptOptions, useWebp = isWebp) => {
       let image = sharp(buffer, attemptOptions);
 
       if (isGrayscale) {
         image = image.grayscale();
       }
 
-      if (isWebp) {
+      if (useWebp) {
         image = image.toFormat('webp', options);
       } else {
         image = image.toFormat('jpeg', options);
@@ -44,35 +45,35 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
       return await image.toBuffer({ resolveWithObject: true });
     };
 
-    // المحاولة الأولى: الإعدادات الافتراضية
+    // المحاولة الأولى: الإعدادات الافتراضية مع sharp
     let result;
     try {
-      result = await processImage({
+      result = await processWithSharp({
         failOnError: false,
         limitInputPixels: 268_435_456,
         pages: -1,
       });
     } catch (err) {
-      console.warn('Initial processing failed:', err.message);
+      console.warn('Sharp initial processing failed:', err.message);
     }
 
     // المحاولة الثانية: استخدام sequentialRead
     if (!result || !result.data || !result.info) {
-      console.warn('Falling back to sequential read processing');
+      console.warn('Falling back to sequential read processing with sharp');
       try {
-        result = await processImage({
+        result = await processWithSharp({
           failOnError: false,
           sequentialRead: true,
           density: 72,
         });
       } catch (err) {
-        console.warn('Sequential read processing failed:', err.message);
+        console.warn('Sharp sequential read processing failed:', err.message);
       }
     }
 
-    // المحاولة الثالثة: تحجيم آمن مع إعدادات أكثر مرونة
+    // المحاولة الثالثة: تحجيم آمن مع sharp
     if (!result || !result.data || !result.info) {
-      console.warn('Forcing processing with resize');
+      console.warn('Forcing processing with resize using sharp');
       let image = sharp(buffer, {
         failOnError: false,
         sequentialRead: true,
@@ -89,56 +90,57 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
         image = image.toFormat('jpeg', options);
       }
 
-      result = await image.toBuffer({ resolveWithObject: true });
+      try {
+        result = await image.toBuffer({ resolveWithObject: true });
+      } catch (err) {
+        console.warn('Sharp resize processing failed:', err.message);
+      }
     }
 
-    // المحاولة الأخيرة: معالجة قسرية بإعدادات بسيطة
+    // المحاولة الرابعة: تحويل إلى JPEG فقط إذا فشل WebP
     if (!result || !result.data || !result.info) {
-      console.warn('Forcing minimal processing');
-      let image = sharp(buffer, { failOnError: false });
-
-      if (isGrayscale) {
-        image = image.grayscale();
+      console.warn('WebP processing failed, forcing JPEG processing with sharp');
+      try {
+        result = await processWithSharp({
+          failOnError: false,
+          sequentialRead: true,
+        }, false); // تحويل إلى JPEG بدلاً من WebP
+      } catch (err) {
+        console.warn('Sharp JPEG processing failed:', err.message);
       }
-
-      if (isWebp) {
-        image = image.toFormat('webp', options);
-      } else {
-        image = image.toFormat('jpeg', options);
-      }
-
-      result = await image.toBuffer({ resolveWithObject: true });
     }
 
-    const { data: output, info } = result;
-
-    // ضمان أن يكون هناك ناتج صالح
-    if (!output || output.length === 0) {
-      console.error('Output is empty after all attempts, forcing minimal processing');
-      let image = sharp(buffer, { failOnError: false });
+    // المحاولة الخامسة: استخدام jimp كخطة احتياطية
+    if (!result || !result.data || !result.info) {
+      console.warn('Falling back to jimp processing');
+      let image;
+      try {
+        image = await Jimp.read(buffer);
+      } catch (err) {
+        console.error('Jimp failed to read image:', err.message);
+        throw new Error('Failed to process image with both sharp and jimp');
+      }
 
       if (isGrayscale) {
         image = image.grayscale();
       }
 
-      if (isWebp) {
-        image = image.toFormat('webp', options);
-      } else {
-        image = image.toFormat('jpeg', options);
-      }
+      image = image.quality(options.quality);
+      const output = await image.getBufferAsync(Jimp.MIME_JPEG); // jimp يدعم JPEG فقط
 
-      const minimalResult = await image.toBuffer({ resolveWithObject: true });
       return {
         err: null,
-        output: minimalResult.data,
+        output,
         headers: {
-          'content-type': isWebp ? 'image/webp' : 'image/jpeg',
-          'content-length': minimalResult.info.size.toString(),
+          'content-type': 'image/jpeg', // jimp ينتج JPEG فقط
+          'content-length': output.length.toString(),
           'x-original-size': originalSize.toString(),
-          'x-bytes-saved': (originalSize - minimalResult.info.size).toString(),
+          'x-bytes-saved': (originalSize - output.length).toString(),
         },
       };
     }
+
+    const { data: output, info } = result;
 
     return {
       err: null,
@@ -152,29 +154,30 @@ module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
     };
   } catch (err) {
     console.error('Critical compression error:', err.message);
-    // محاولة أخيرة قسرية
-    let image = sharp(buffer, {
-      failOnError: false,
-      sequentialRead: true,
-    })
-      .resize({ fit: 'inside', withoutEnlargement: true })
-      .toFormat(isWebp ? 'webp' : 'jpeg', {
-        quality: Math.max(1, Math.min(quality || 40, 100)),
-        progressive: true,
-        optimizeScans: true,
-        chromaSubsampling: '4:4:4',
-      });
+    // محاولة أخيرة باستخدام jimp
+    let image;
+    try {
+      image = await Jimp.read(buffer);
+    } catch (jimpErr) {
+      console.error('Jimp final attempt failed:', jimpErr.message);
+      throw new Error('Failed to process image with both sharp and jimp');
+    }
 
-    const finalResult = await image.toBuffer({ resolveWithObject: true });
+    if (isGrayscale) {
+      image = image.grayscale();
+    }
+
+    image = image.quality(Math.max(1, Math.min(quality || 40, 100)));
+    const output = await image.getBufferAsync(Jimp.MIME_JPEG);
 
     return {
       err: null,
-      output: finalResult.data,
+      output,
       headers: {
-        'content-type': isWebp ? 'image/webp' : 'image/jpeg',
-        'content-length': finalResult.info.size.toString(),
+        'content-type': 'image/jpeg',
+        'content-length': output.length.toString(),
         'x-original-size': originalSize.toString(),
-        'x-bytes-saved': (originalSize - finalResult.info.size).toString(),
+        'x-bytes-saved': (originalSize - output.length).toString(),
       },
     };
   }
