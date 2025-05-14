@@ -1,5 +1,5 @@
-const fetch = require('node-fetch');
-const pick = require('lodash').pick; // استبدال util/pick بـ lodash كما هو موجود
+const puppeteer = require('puppeteer');
+const pick = require('lodash').pick;
 const shouldCompress = require('../util/shouldCompress');
 const compress = require('../util/compress');
 const DEFAULT_QUALITY = 40;
@@ -9,7 +9,7 @@ exports.handler = async (e, t) => {
     { jpeg: s, bw: o, l: a } = e.queryStringParameters;
 
   if (!r)
-    return { statusCode: 200, body: 'bandwidth-hero-proxy' }; // تغيير الاستجابة كما هو مطلوب
+    return { statusCode: 200, body: 'bandwidth-hero-proxy' };
 
   try {
     r = JSON.parse(r);
@@ -23,36 +23,46 @@ exports.handler = async (e, t) => {
 
   try {
     let h = {};
-    const response = await fetch(r, {
-      headers: {
-        ...pick(e.headers, ['cookie', 'dnt', 'referer']),
-        'user-agent': 'Bandwidth-Hero Compressor',
-        'x-forwarded-for': e.headers['x-forwarded-for'] || e.ip,
-        via: '1.1 bandwidth-hero',
-      },
-      method: 'GET',
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    const page = await browser.newPage();
+
+    // إعدادات لتقليد سلوك المستخدم الحقيقي
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    await page.setExtraHTTPHeaders({
+      ...pick(e.headers, ['cookie', 'dnt', 'referer']),
+      'user-agent': 'Bandwidth-Hero Compressor',
+      'x-forwarded-for': e.headers['x-forwarded-for'] || e.ip,
+      'via': '1.1 bandwidth-hero',
     });
 
-    if (!response.ok) {
-      return { statusCode: response.status || 302 };
-    }
+    // الذهاب إلى الصفحة وانتظار مرور التحدي
+    await page.goto(r, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.waitForFunction('document.querySelector("body") && !document.querySelector(".cf-browser-verification")', { timeout: 30000 });
 
-    h = Object.fromEntries(response.headers.entries()); // تحويل Headers إلى كائن
-    const c = await response.buffer(); // الحصول على Buffer مباشرة
-    const l = h['content-type'] || '';
-    const p = c.length;
+    // الحصول على المحتوى كـ Buffer
+    const c = await page.content();
+    const buffer = Buffer.from(c);
+
+    // إغلاق المتصفح
+    await browser.close();
+
+    const l = 'text/html'; // يمكن تحسين هذا ليكون content-type الحقيقي
+    const p = buffer.length;
 
     if (!shouldCompress(l, p, d)) {
-      console.log('Bypassing... Size: ', c.length);
+      console.log('Bypassing... Size: ', p);
       return {
         statusCode: 200,
-        body: c.toString('base64'),
+        body: buffer.toString('base64'),
         isBase64Encoded: true,
         headers: { 'content-encoding': 'identity', ...h },
       };
     }
 
-    let { err: u, output: y, headers: g } = await compress(c, d, n, i, p);
+    let { err: u, output: y, headers: g } = await compress(buffer, d, n, i, p);
     if (u) throw (console.log('Conversion failed: ', r), u);
 
     console.log(`From ${p}, Saved: ${(p - y.length) / p}%`);
@@ -64,6 +74,7 @@ exports.handler = async (e, t) => {
       headers: { 'content-encoding': 'identity', ...h, ...g },
     };
   } catch (f) {
-    return console.error(f), { statusCode: 500, body: f.message || '' };
+    console.error(f);
+    return { statusCode: 500, body: f.message || 'Error processing request' };
   }
 };
