@@ -34,15 +34,6 @@ exports.handler = async (e, t) => {
     });
 
     if (!response.ok) {
-      // التحقق مما إذا كانت الاستجابة تحتوي على تحدي Cloudflare
-      const text = await response.text();
-      if (text.includes('cf-browser-verification') || text.includes('challenge-platform')) {
-        return {
-          statusCode: 200,
-          body: text, // إعادة الاستجابة كما هي للسماح بمعالجة التحدي في المتصفح
-          headers: { 'content-type': 'text/html' },
-        };
-      }
       return { statusCode: response.status || 302 };
     }
 
