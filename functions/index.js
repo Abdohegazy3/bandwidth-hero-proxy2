@@ -3,6 +3,7 @@ const pick = require("../util/pick"),
   shouldCompress = require("../util/shouldCompress"),
   compress = require("../util/compress"),
   DEFAULT_QUALITY = 40;
+
 exports.handler = async (e, t) => {
   let { url: r } = e.queryStringParameters,
     { jpeg: s, bw: o, l: a } = e.queryStringParameters;
@@ -14,8 +15,10 @@ exports.handler = async (e, t) => {
   Array.isArray(r) && (r = r.join("&url=")),
     (r = r.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, "http://"));
   let d = !s,
-    n = 0 != o,
-    i = parseInt(a, 10) || 40;
+    n = o !== "0", // تحسين التحقق من grayscale
+    // التحقق من قيمة quality
+    i = Number.isInteger(parseInt(a, 10)) && parseInt(a, 10) >= 1 && parseInt(a, 10) <= 100 ? parseInt(a, 10) : DEFAULT_QUALITY;
+
   try {
     let h = {},
       { data: c, type: l } = await fetch(r, {
@@ -46,7 +49,7 @@ exports.handler = async (e, t) => {
         }
       );
     {
-      let { err: u, output: y, headers: g } = await compress(c, d, n, i, p);
+      let { err: u, output: y, headers: g } = await compress(c, n, i, p); // تمرير المعاملات بشكل صحيح
       if (u) throw (console.log("Conversion failed: ", r), u);
       console.log(`From ${p}, Saved: ${(p - y.length) / p}%`);
       let $ = y.toString("base64");
