@@ -1,89 +1,24 @@
-const sharp = require('sharp');
-const Jimp = require('jimp');
+// Compresses an image using Sharp library
+const sharp = require("sharp");
 
-module.exports = async (buffer, isWebp, isGrayscale, quality, originalSize) => {
-  if (!buffer || !Buffer.isBuffer(buffer)) {
-    throw new Error('Invalid input buffer');
-  }
+function compress(imagePath, grayscale, quality, originalSize) {
+  let format = "jpeg"; // تحديد الصيغة كـ JPEG مباشرة
 
-  const options = {
-    quality: Math.max(1, Math.min(quality || 40, 100)),
-    progressive: true,
-    optimizeScans: true,
-    chromaSubsampling: '4:4:4',
-    force: true,
-    effort: 1,
-  };
-
-  const processWithSharp = async (attemptOptions, targetFormat) => {
-    let image = sharp(buffer, attemptOptions);
-
-    if (isGrayscale) {
-      image = image.grayscale();
-    }
-
-    image = image.toFormat(targetFormat, options);
-    return await image.toBuffer({ resolveWithObject: true });
-  };
-
-  let result;
-  try {
-    result = await processWithSharp({
-      failOnError: false,
-      limitInputPixels: 268_435_456,
-      sequentialRead: true,
-      pages: -1,
-    }, 'jpeg');
-  } catch (err) {
-    console.warn('Sharp JPEG processing failed:', err.message);
-  }
-
-  if (!result || !result.data || !result.info) {
-    console.warn('Falling back to WebP processing with sharp');
-    try {
-      result = await processWithSharp({
-        failOnError: false,
-        limitInputPixels: 268_435_456,
-        sequentialRead: true,
-        pages: -1,
-      }, 'webp');
-    } catch (err) {
-      console.warn('Sharp WebP processing failed:', err.message);
-    }
-  }
-
-  if (!result || !result.data || !result.info) {
-    console.warn('Falling back to jimp processing');
-    const image = await Jimp.read(buffer);
-
-    if (isGrayscale) {
-      image.grayscale();
-    }
-
-    image.quality(options.quality);
-    const output = await image.getBufferAsync(Jimp.MIME_JPEG);
-
-    return {
+  return sharp(imagePath)
+    .grayscale(grayscale)
+    .toFormat(format, { quality, progressive: true, optimizeScans: true })
+    .toBuffer({ resolveWithObject: true })
+    .then(({ data, info }) => ({
       err: null,
-      output,
       headers: {
-        'content-type': 'image/jpeg',
-        'content-length': output.length.toString(),
-        'x-original-size': originalSize.toString(),
-        'x-bytes-saved': (originalSize - output.length).toString(),
+        "content-type": `image/${format}`,
+        "content-length": info.size,
+        "x-original-size": originalSize,
+        "x-bytes-saved": originalSize - info.size,
       },
-    };
-  }
+      output: data,
+    }))
+    .catch((err) => ({ err }));
+}
 
-  const { data: output, info } = result;
-  return {
-    err: null,
-    output,
-    headers: {
-      'content-type': info.format === 'webp' ? 'image/webp' : 'image/jpeg',
-      'content-length': info.size.toString(),
-      'x-original-size': originalSize.toString(),
-      'x-bytes-saved': (originalSize - info.size).toString(),
-    },
-  };
-};
+module.exports = compress;
