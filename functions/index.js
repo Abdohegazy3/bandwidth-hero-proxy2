@@ -8,15 +8,14 @@ exports.handler = async (e, t) => {
   let { url: r } = e.queryStringParameters,
     { jpeg: s, bw: o, l: a } = e.queryStringParameters;
   if (!r)
-    return { statusCode: 200, body: "Bandwidth Hero Data Compression Service" };
+    return { statusCode: 200, body: "bandwidth-hero-proxy" }; // تغيير النص هنا
   try {
     r = JSON.parse(r);
   } catch {}
   Array.isArray(r) && (r = r.join("&url=")),
     (r = r.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, "http://"));
   let d = !s,
-    n = o !== "0", // تحسين التحقق من grayscale
-    // التحقق من قيمة quality
+    n = o !== "0",
     i = Number.isInteger(parseInt(a, 10)) && parseInt(a, 10) >= 1 && parseInt(a, 10) <= 100 ? parseInt(a, 10) : DEFAULT_QUALITY;
 
   try {
@@ -49,7 +48,7 @@ exports.handler = async (e, t) => {
         }
       );
     {
-      let { err: u, output: y, headers: g } = await compress(c, n, i, p); // تمرير المعاملات بشكل صحيح
+      let { err: u, output: y, headers: g } = await compress(c, n, i, p);
       if (u) throw (console.log("Conversion failed: ", r), u);
       console.log(`From ${p}, Saved: ${(p - y.length) / p}%`);
       let $ = y.toString("base64");
