@@ -12,7 +12,7 @@ exports.handler = async (e, t) => {
   if (!r) {
     return {
       statusCode: 200,
-      body: "bandwidth-hero-proxy", // نص محدث
+      body: "Bandwidth Hero Data Compression Service",
     };
   }
 
@@ -30,32 +30,46 @@ exports.handler = async (e, t) => {
 
   try {
     let h = {},
-      { data: c, type: l } = await fetch(r, {
+      fetchResponse = await fetch(r, {
         headers: {
           ...pick(e.headers, ["cookie", "dnt", "referer"]),
           "user-agent": "Bandwidth-Hero Compressor",
           "x-forwarded-for": e.headers["x-forwarded-for"] || e.ip,
           via: "1.1 bandwidth-hero",
         },
-        timeout: 10000, // إضافة حد زمني لتجنب التعليق
-      }).then(async (e) =>
-        e.ok
-          ? ((h = e.headers),
-            {
-              data: await e.buffer(),
-              type: e.headers.get("content-type") || "",
-            })
-          : { statusCode: e.status || 302 },
-      ),
-      p = c.length;
+        timeout: 10000,
+      });
+
+    if (!fetchResponse.ok) {
+      console.log("Fetch failed with status:", fetchResponse.status);
+      return {
+        statusCode: fetchResponse.status || 302,
+        body: "",
+      };
+    }
+
+    let { data: c, type: l } = {
+      data: await fetchResponse.buffer(),
+      type: fetchResponse.headers.get("content-type") || "",
+    };
+    h = fetchResponse.headers;
+
+    let p = c ? c.length : 0; // التحقق من c قبل الوصول إلى length
+    if (p === 0) {
+      console.log("No data received from URL:", r);
+      return {
+        statusCode: 400,
+        body: "No data received",
+      };
+    }
 
     // إعداد الرؤوس مع دعم CORS وCSP
     let headers = {
       "content-encoding": "identity",
-      "Access-Control-Allow-Origin": "*", // دعم CORS
-      "Content-Security-Policy": "img-src 'self' https://luxury-salmiakki-597e62.netlify.app;", // دعم CSP
-      "Cross-Origin-Embedder-Policy": "require-corp", // دعم COEP
-      "Cross-Origin-Opener-Policy": "same-origin", // دعم COOP
+      "Access-Control-Allow-Origin": "*",
+      "Content-Security-Policy": "img-src 'self' https://luxury-salmiakki-597e62.netlify.app;",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+      "Cross-Origin-Opener-Policy": "same-origin",
       ...h,
     };
 
