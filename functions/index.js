@@ -50,7 +50,7 @@ exports.handler = async (e, t) => {
     {
       let { err: u, output: y, headers: g } = await compress(c, n, i, p);
       if (u) throw (console.log("Conversion failed: ", r), u);
-      console.log(From ${p}, Saved: ${(p - y.length) / p}%);
+      console.log(`From ${p}, Saved: ${(p - y.length) / p}%`);
       let $ = y.toString("base64");
       return {
         statusCode: 200,
